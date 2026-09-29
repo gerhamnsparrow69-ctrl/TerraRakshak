@@ -1,0 +1,97 @@
+//TIER 3: ESP32 - THERMAL CAMERA ARRAY (I2C)
+
+#include <Wire.h>
+#include <Adafruit_MLX90640.h>
+
+#define I2C0_SDA 21
+#define I2C0_SCL 22
+#define I2C1_SDA 16
+#define I2C1_SCL 17
+
+// NOTE: some versions of the Adafruit_MLX90640 library call this
+// MLX90640_I2CADDR_DEFAULT instead of MLX90640_I2C_ADDR. If this
+// line fails to compile, swap the name on the right of the #define.
+#define MLX90640_ADDR MLX90640_I2C_ADDR
+
+Adafruit_MLX90640 mlx1;
+Adafruit_MLX90640 mlx2;
+float frame1[768];
+float frame2[768];
+
+bool cam1_ok = false;
+bool cam2_ok = false;
+
+unsigned long last_thermal = 0;
+
+// index of the hottest pixel (0-767, row-major: index = row*32 + col).
+void summarize(float *frame, float &mn, float &mx, float &avg, int &hotspot_idx) {
+  mn = frame[0];
+  mx = frame[0];
+  hotspot_idx = 0;
+  float sum = 0;
+  for (int i = 0; i < 768; i++) {
+    sum += frame[i];
+    if (frame[i] < mn) mn = frame[i];
+    if (frame[i] > mx) {
+      mx = frame[i];
+      hotspot_idx = i;
+    }
+  }
+  avg = sum / 768.0;
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Init Bus 0
+  Wire.begin(I2C0_SDA, I2C0_SCL, 400000);
+  if (!mlx1.begin(MLX90640_ADDR, &Wire)) {
+    Serial.println("{\"T\":3,\"err\":\"Cam 1 Failed\"}");
+    cam1_ok = false;
+  } else {
+    mlx1.setMode(MLX90640_CHESS);
+    mlx1.setRefreshRate(MLX90640_4_HZ);
+    cam1_ok = true;
+  }
+
+  // Init Bus 1
+  Wire1.begin(I2C1_SDA, I2C1_SCL, 400000);
+  if (!mlx2.begin(MLX90640_ADDR, &Wire1)) {
+    Serial.println("{\"T\":3,\"err\":\"Cam 2 Failed\"}");
+    cam2_ok = false;
+  } else {
+    mlx2.setMode(MLX90640_CHESS);
+    mlx2.setRefreshRate(MLX90640_4_HZ);
+    cam2_ok = true;
+  }
+}
+
+void loop() {
+  if (millis() - last_thermal >= 250) {
+    last_thermal = millis();
+
+    Serial.print("{\"T\":3");
+
+    if (cam1_ok && mlx1.getFrame(frame1) == 0) {
+      float mn, mx, avg;
+      int hotspot;
+      summarize(frame1, mn, mx, avg, hotspot);
+      Serial.print(",\"c1_min\":"); Serial.print(mn, 1);
+      Serial.print(",\"c1_max\":"); Serial.print(mx, 1);
+      Serial.print(",\"c1_avg\":"); Serial.print(avg, 1);
+      Serial.print(",\"c1_hot\":"); Serial.print(hotspot);
+    }
+
+    if (cam2_ok && mlx2.getFrame(frame2) == 0) {
+      float mn, mx, avg;
+      int hotspot;
+      summarize(frame2, mn, mx, avg, hotspot);
+      Serial.print(",\"c2_min\":"); Serial.print(mn, 1);
+      Serial.print(",\"c2_max\":"); Serial.print(mx, 1);
+      Serial.print(",\"c2_avg\":"); Serial.print(avg, 1);
+      Serial.print(",\"c2_hot\":"); Serial.print(hotspot);
+    }
+
+    Serial.println("}");
+  }
+}
